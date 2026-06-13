@@ -539,8 +539,23 @@ export const WikiCollector: React.FC<WikiCollectorProps> = ({
         try {
           subData = await fetchWikiPage(updatedTasks[index].url, { skipMenu: true });
           success = true;
-        } catch (err) {
+        } catch (err: any) {
           lastError = err;
+          
+          // Kiểm tra lỗi vĩnh viễn (trang không tồn tại) để không mất thời gian retry
+          const errMsg = String(err.message || err).toLowerCase();
+          if (
+            errMsg.includes('không tồn tại') || 
+            errMsg.includes('missingtitle') || 
+            errMsg.includes('notfound') || 
+            errMsg.includes('invalidtitle') ||
+            errMsg.includes('404')
+          ) {
+            console.warn(`[Wiki Collector] Phát hiện trang không tồn tại, bỏ qua retry: ${updatedTasks[index].title}`);
+            retries = -1;
+            break;
+          }
+
           retries--;
           if (retries >= 0) {
             // Exponential backoff: 500ms, 1s, 2s, 4s, 8s...

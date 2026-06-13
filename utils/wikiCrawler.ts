@@ -279,7 +279,7 @@ export function parseHtmlToMenuTree(rawHtml: string, domain: string): WikiMenuIt
           text = text.replace(/[\n\t\s]+/g, ' ').trim();
           item.title = text;
 
-          if (href && !href.startsWith('#') && !href.startsWith('javascript:')) {
+          if (href && !href.startsWith('#') && !href.startsWith('javascript:') && !href.includes('redlink=1') && !href.includes('action=edit')) {
             let absoluteUrl = '';
             if (href.startsWith('/')) {
               absoluteUrl = `https://${domain}${href}`;
@@ -486,7 +486,7 @@ export function mapFandomNavJson(rawList: any[], domain: string): WikiMenuItem[]
     let absoluteUrl: string | undefined = undefined;
     let isLink = false;
 
-    if (href && href !== '#' && !href.startsWith('javascript:')) {
+    if (href && href !== '#' && !href.startsWith('javascript:') && !href.includes('redlink=1') && !href.includes('action=edit')) {
       if (href.startsWith('/')) {
         absoluteUrl = `https://${domain}${href}`;
       } else if (href.startsWith('http://') || href.startsWith('https://')) {
@@ -576,7 +576,7 @@ export async function fetchFandomLocalNavigation(domain: string): Promise<WikiMe
       let absoluteUrl: string | undefined = undefined;
       let isLink = false;
 
-      if (href && href !== '#' && !href.startsWith('javascript:')) {
+      if (href && href !== '#' && !href.startsWith('javascript:') && !href.includes('redlink=1') && !href.includes('action=edit')) {
         if (href.startsWith('/')) {
           absoluteUrl = `https://${domain}${href}`;
         } else if (href.startsWith('http://') || href.startsWith('https://')) {
@@ -726,7 +726,7 @@ export function parseHtmlToSectionTree(rawHtml: string, domain: string): WikiMen
           let text = a.textContent?.trim() || '';
           text = text.replace(/[\n\t\s]+/g, ' ').trim();
           
-          if (href && !href.startsWith('#') && !href.startsWith('javascript:') && text) {
+          if (href && !href.startsWith('#') && !href.startsWith('javascript:') && !href.includes('redlink=1') && !href.includes('action=edit') && text) {
             let absoluteUrl = '';
             if (href.startsWith('/')) {
               absoluteUrl = `https://${domain}${href}`;
@@ -759,7 +759,7 @@ export function parseHtmlToSectionTree(rawHtml: string, domain: string): WikiMen
           let text = a.textContent?.trim() || '';
           text = text.replace(/[\n\t\s]+/g, ' ').trim();
           
-          if (href && !href.startsWith('#') && !href.startsWith('javascript:') && text) {
+          if (href && !href.startsWith('#') && !href.startsWith('javascript:') && !href.includes('redlink=1') && !href.includes('action=edit') && text) {
             let absoluteUrl = '';
             if (href.startsWith('/')) {
               absoluteUrl = `https://${domain}${href}`;
@@ -924,16 +924,18 @@ export function generateAutoCategorizedTree(links: string[], domain: string): Wi
 
 async function fetchWithProxyRotation(originalUrl: string): Promise<any> {
   const proxyFactories = [
+    // 0. Local CORS proxy (Vite dev server)
+    (url: string) => `/cors-proxy?url=${encodeURIComponent(url)}`,
     // 1. Direct fetch (best if supports CORS natively via origin=*)
     (url: string) => url,
-    // 2. corsproxy.io
+    // 2. codetabs proxy (Highly reliable public proxy fallback)
+    (url: string) => `https://api.codetabs.com/v1/proxy?value=${encodeURIComponent(url)}`,
+    // 3. corsproxy.io
     (url: string) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-    // 3. allorigins.win raw
+    // 4. allorigins.win raw
     (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    // 4. cors.lol
-    (url: string) => `https://cors.lol/?url=${encodeURIComponent(url)}`,
-    // 5. thingproxy
-    (url: string) => `https://thingproxy.freeboard.io/fetch/${url}`
+    // 5. cors.lol
+    (url: string) => `https://cors.lol/?url=${encodeURIComponent(url)}`
   ];
 
   let lastError: any = null;
@@ -995,16 +997,18 @@ async function fetchWithProxyRotation(originalUrl: string): Promise<any> {
 
 async function fetchHtmlWithProxyRotation(originalUrl: string): Promise<string> {
   const proxyFactories = [
+    // 0. Local CORS proxy (Vite dev server)
+    (url: string) => `/cors-proxy?url=${encodeURIComponent(url)}`,
     // 1. Direct fetch (best if it bypasses CORS)
     (url: string) => url,
-    // 2. corsproxy.io
+    // 2. codetabs proxy (Highly reliable public proxy fallback)
+    (url: string) => `https://api.codetabs.com/v1/proxy?value=${encodeURIComponent(url)}`,
+    // 3. corsproxy.io
     (url: string) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-    // 3. allorigins.win raw
+    // 4. allorigins.win raw
     (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    // 4. cors.lol
-    (url: string) => `https://cors.lol/?url=${encodeURIComponent(url)}`,
-    // 5. thingproxy
-    (url: string) => `https://thingproxy.freeboard.io/fetch/${url}`
+    // 5. cors.lol
+    (url: string) => `https://cors.lol/?url=${encodeURIComponent(url)}`
   ];
 
   let lastError: any = null;
@@ -1053,6 +1057,14 @@ export async function fetchWikiPage(urlStr: string, options?: { skipMenu?: boole
     responseError = err;
   }
 
+  if (responseError) {
+    const errCode = responseError.code || responseError.message;
+    if (errCode === 'missingtitle' || errCode === 'notfound' || errCode === 'invalidtitle' ||
+        (typeof errCode === 'string' && (errCode.includes('missingtitle') || errCode.includes('notfound') || errCode.includes('invalidtitle')))) {
+      throw new Error(`Trang bối cảnh không tồn tại (code: ${responseError.code || 'missingtitle'}).`);
+    }
+  }
+
   // If we successfully retrieved data from the MediaWiki API (either direct or proxy)
   if (data && !data.error) {
     try {
@@ -1089,8 +1101,12 @@ export async function fetchWikiPage(urlStr: string, options?: { skipMenu?: boole
       let regexMatch;
       while ((regexMatch = linkRegex.exec(rawHtml)) !== null) {
         try {
-          const decoded = decodeURIComponent(regexMatch[1]).split(/[?#]/)[0].replace(/_/g, ' ').trim();
-          const fakeUrl = `https://${parsed.domain}/wiki/${regexMatch[1]}`;
+          const rawLink = regexMatch[1];
+          if (rawLink.includes('redlink=1') || rawLink.includes('action=edit')) {
+            continue; // Bỏ qua trang không tồn tại
+          }
+          const decoded = decodeURIComponent(rawLink).split(/[?#]/)[0].replace(/_/g, ' ').trim();
+          const fakeUrl = `https://${parsed.domain}/wiki/${rawLink}`;
           if (decoded && isWikiItemLoreValid(decoded, fakeUrl, parsed.domain) && !foundHtmlLinks.includes(decoded)) {
             foundHtmlLinks.push(decoded);
           }
@@ -1185,8 +1201,12 @@ export async function fetchWikiPage(urlStr: string, options?: { skipMenu?: boole
     let match;
     while ((match = linkRegex.exec(html)) !== null) {
       try {
-        const decoded = decodeURIComponent(match[1]).split(/[?#]/)[0].replace(/_/g, ' ').trim();
-        const fakeUrl = `https://${parsed.domain}/wiki/${match[1]}`;
+        const rawLink = match[1];
+        if (rawLink.includes('redlink=1') || rawLink.includes('action=edit')) {
+          continue; // Bỏ qua trang không tồn tại
+        }
+        const decoded = decodeURIComponent(rawLink).split(/[?#]/)[0].replace(/_/g, ' ').trim();
+        const fakeUrl = `https://${parsed.domain}/wiki/${rawLink}`;
         if (decoded && isWikiItemLoreValid(decoded, fakeUrl, parsed.domain) && !foundLinks.includes(decoded)) {
           foundLinks.push(decoded);
         }
